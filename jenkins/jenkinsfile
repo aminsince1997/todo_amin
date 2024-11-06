@@ -1,0 +1,72 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = ''
+        EKS_CLUSTER_NAME = ''
+        DOCKER_HUB_REPO_FRONTEND = ''
+        DOCKER_HUB_REPO_BACKEND = ''
+        K8S_MANIFESTS = 'tools/k8s'
+        DOCKER_CREDENTIALS_ID = ''
+        AWS_CREDENTIALS_ID = ''
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git ''
+            }
+        }
+
+        stage('Build and Push Docker Images') {
+            steps {
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
+ 
+                        def frontendImage = docker.build("${DOCKER_HUB_REPO_FRONTEND}")
+                        frontendImage.push('latest')
+                        def backendImage = docker.build("${DOCKER_HUB_REPO_BACKEND}")
+                        backendImage.push('latest')
+                    }
+                }
+            }
+        }
+
+        stage('Configure kubectl') {
+            steps {
+                withCredentials([aws(credentialsId: "${AWS_CREDENTIALS_ID}", region: "${AWS_DEFAULT_REGION}")]) {
+                    sh """
+                    aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                dir("${K8S_MANIFESTS}") {
+                    sh """
+                    kubectl apply -f namespace.yaml
+                    kubectl apply -f init-db-configmap.yaml
+                    kubectl apply -f postgresql-pvc.yaml
+                    kubectl apply -f postgresql-deployment.yaml
+                    kubectl apply -f postgresql-service.yaml
+                    kubectl apply -f backend-deployment.yaml
+                    kubectl apply -f backend-service.yaml
+                    kubectl apply -f frontend-deployment.yaml
+                    kubectl apply -f frontend-service.yaml
+                    kubectl apply -f nginx-configmap.yaml
+                    kubectl apply -f nginx-deployment.yaml
+                    kubectl apply -f nginx-service.yaml
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}

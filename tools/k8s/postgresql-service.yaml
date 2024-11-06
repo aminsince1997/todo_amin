@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: my-todo
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+  selector:
+    app: postgresql
